@@ -31,10 +31,14 @@ def cleanup(s):
 
 def filter_hits(hits, album_name):
     album_hits = hits['album_hits']
-    return [(a['album']['artist'], a['album']['name'], levenshtein(a['album']['name'], album_name), a['album']['albumId']) for a in album_hits]
+    return [(a['album']['artist'], 
+             a['album']['name'], 
+             levenshtein(cleanup(a['album']['name']), cleanup(album_name)), 
+             a['album']['albumId']) 
+             for a in album_hits]
 
 def search_for_artist_and_album(mob, artist, album):
-    hits = mob.search(cleanup("{0} {1}".format(artist, album)))
+    hits = mob.search("{0} {1}".format(artist, album))
     return filter_hits(hits, album)
 
 # Return list of tuples (title, track #, store id) for album
@@ -56,9 +60,10 @@ while True:
     sorted_albums = sorted(albums, key=lambda k:k[2])
 
     # for (artist, album, distance, full_details) in sorted_albums:
-    (artist, album, distance, album_id) = sorted_albums[0]
+    if len(sorted_albums) > 0:
+        (artist, album, distance, album_id) = sorted_albums[0]
 
-    print("Results: Artist: {0}, Album: {1}, Distance {2}".format(artist, album, distance))
-    album_tracks = get_tracks_from_album(album_id)
-    pp.pprint(album_tracks)
+        print("Results: Artist: {0}, Album: {1}, Distance {2}".format(artist, album, distance))
+        album_tracks = get_tracks_from_album(album_id)
+        pp.pprint(album_tracks)
 # for each track in album, mob.add_store_track(store_song_id)
