@@ -6,6 +6,8 @@ import getpass
 import pprint
 from gmusicapi import Mobileclient
 
+__version__ = '0.1'
+
 def levenshtein(a,b):
     "Calculates the Levenshtein distance between a and b."
     n, m = len(a), len(b)
@@ -42,28 +44,69 @@ def search_for_artist_and_album(mob, artist, album):
     return filter_hits(hits, album)
 
 # Return list of tuples (title, track #, store id) for album
-def get_tracks_from_album(album_id):
+def get_tracks_from_album(mob, album_id):
   album_info = mob.get_album_info(album_id,include_tracks=True)
   return [(t['title'], t['trackNumber'], t['storeId']) for t in album_info['tracks']]
 
-pp = pprint.PrettyPrinter(indent=4)
-username = input("username: ")
-password = getpass.getpass()
+def get_local_dirs(path):
+    artist_album_list = []
+    artist_dirs = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path,f)) and not f.startswith('.')]
+    for artist_dir in artist_dirs:
+        album_dirs = [d for d in os.listdir(os.path.join(path, artist_dir)) if os.path.isdir(os.path.join(path, artist_dir, d)) and not d.startswith('.')]
+        artist_album_dict = {}
+        artist_album_dict['artist'] = artist_dir
+        artist_album_dict['albums'] = album_dirs
+        artist_album_list.append(artist_album_dict)
+    return artist_album_list
 
-mob = Mobileclient()
-mob.login(username, password, Mobileclient.FROM_MAC_ADDRESS)
-while True:
-    search_artist = input("Artist: ")
-    search_album = input("Album: ")
+def print_help():
+    print("{0} v{1}".format(sys.argv[0],__version__))
+    print("  To use: {} <username> <path>".format(sys.argv[0]))
+    print("   where: <username> = Google Play username")
+    print("          <path>     = root directory containing subdirectories named after artists")
+    print("                       (Imagine the root of your music directory)")
 
-    albums = search_for_artist_and_album(mob, search_artist, search_album)
-    sorted_albums = sorted(albums, key=lambda k:k[2])
+def main():
+    if len(sys.argv) != 3:
+        print_help()
+        sys.exit(1)
+    else:
+        username = sys.argv[1]
+        path = sys.argv[2]
+    password = getpass.getpass()
 
-    # for (artist, album, distance, full_details) in sorted_albums:
-    if len(sorted_albums) > 0:
-        (artist, album, distance, album_id) = sorted_albums[0]
+    pp = pprint.PrettyPrinter(indent=4)
 
-        print("Results: Artist: {0}, Album: {1}, Distance {2}".format(artist, album, distance))
-        album_tracks = get_tracks_from_album(album_id)
-        pp.pprint(album_tracks)
-# for each track in album, mob.add_store_track(store_song_id)
+    local_list = get_local_dirs(path)
+    pp.pprint(local_list)
+
+    mob = Mobileclient()
+    mob.login(username, password, Mobileclient.FROM_MAC_ADDRESS)
+    if not mob.is_authenticated():
+        sys.exit(1)
+
+    for item in local_list:
+        search_artist = item['artist']
+        for search_album in item['albums']:
+            # print("Searching for {0} - {1}".format(search_artist, search_album))
+            albums = search_for_artist_and_album(mob, search_artist, search_album)
+            sorted_albums = sorted(albums, key=lambda k:k[2])
+
+            # for (artist, album, distance, full_details) in sorted_albums:
+            if len(sorted_albums) > 0:
+                (artist, album, distance, album_id) = sorted_albums[0]
+
+                if distance > 0:
+                    print("Results: ({2}) {0} - {1} for {3} - {4}".format(artist, album, distance, search_artist, search_album))
+                #else:
+                    #print("Exact Match: Artist: {0}, Album: {1}".format(artist, album))
+
+                album_tracks = get_tracks_from_album(mob, album_id)
+                # pp.pprint(album_tracks)
+                # for each track in album, mob.add_store_track(store_song_id)
+            else:
+                print("No Results for Artist: {0}, Album: {1}".format(search_artist, search_album))
+
+
+if __name__ == '__main__':
+    sys.exit(main())
