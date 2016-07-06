@@ -4,6 +4,7 @@ import sys
 import os
 import getpass
 import pprint
+import string
 from gmusicapi import Mobileclient
 
 __version__ = '0.1'
@@ -28,20 +29,68 @@ def levenshtein(a,b):
 
     return current[n]
 
-def cleanup(s):
-    return s.lower().replace('the ','',-1)
+def find_ratio(a, b):
+    a_filtered = cleanup(a)
+    b_filtered = cleanup(b)
 
-def filter_hits(hits, album_name):
+    distance = levenshtein(a_filtered, b_filtered)
+    ratio = (distance / max(len(a_filtered), len(b_filtered))) 
+    
+    # if either string is a subset of the other, that is a better fit
+    if a in b:
+        ratio /= 2
+    if b in a:
+        ratio /= 2
+    return ratio
+
+def similarity(artist_a, artist_b, album_a, album_b):
+    artist_ratio = find_ratio(artist_a, artist_b)
+    album_ratio = find_ratio(album_a, album_b)
+
+    ratio = artist_ratio + album_ratio
+
+    return ratio
+
+def cleanup(s):
+    exclude = set(string.punctuation)
+
+    extra_words_filter = ''.join(
+             s.lower()
+              .replace('the','',-1)
+              .replace('deluxe','',-1)
+              .replace('expanded','',-1)
+              .replace('edition','',-1)
+              .replace('remastered','',-1)
+              .replace('reissue','',-1)
+              .replace('version','',-1)
+              .replace('bonus','',-1)
+              .replace('tracks','',-1)
+              .replace('track','',-1)
+              .split())
+
+    punc_filter = ''.join(ch for ch in extra_words_filter if ch not in exclude)
+    return punc_filter
+
+
+def filter_hits(hits, artist_name, album_name):
     album_hits = hits['album_hits']
     return [(a['album']['artist'], 
              a['album']['name'], 
-             levenshtein(cleanup(a['album']['name']), cleanup(album_name)), 
+             similarity(a['album']['artist'], artist_name, a['album']['name'], album_name),
              a['album']['albumId']) 
              for a in album_hits]
 
 def search_for_artist_and_album(mob, artist, album):
-    hits = mob.search("{0} {1}".format(artist, album))
-    return filter_hits(hits, album)
+    retries = 2
+    while retries > 0:
+        try: 
+            hits = mob.search("{0} {1}".format(artist, album))
+            return filter_hits(hits, artist, album)
+        except:
+            print("Oops, some error searching")
+            retries = retries - 1
+    sys.exit(2)
+
 
 # Return list of tuples (title, track #, store id) for album
 def get_tracks_from_album(mob, album_id):
@@ -85,28 +134,42 @@ def main():
     if not mob.is_authenticated():
         sys.exit(1)
 
+    total_items = 0
+    partial_items = 0
+    exact_items = 0
+    no_items = 0
+
     for item in local_list:
         search_artist = item['artist']
         for search_album in item['albums']:
             # print("Searching for {0} - {1}".format(search_artist, search_album))
+            total_items += 1
             albums = search_for_artist_and_album(mob, search_artist, search_album)
             sorted_albums = sorted(albums, key=lambda k:k[2])
 
-            # for (artist, album, distance, full_details) in sorted_albums:
+            # for (artist, album, ratio, full_details) in sorted_albums:
             if len(sorted_albums) > 0:
-                (artist, album, distance, album_id) = sorted_albums[0]
+                (artist, album, ratio, album_id) = sorted_albums[0]
 
-                if distance > 0:
-                    print("Results: ({2}) {0} - {1} for {3} - {4}".format(artist, album, distance, search_artist, search_album))
-                #else:
-                    #print("Exact Match: Artist: {0}, Album: {1}".format(artist, album))
+                if ratio > 0:
+                    partial_items += 1
+                    print("Results: ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
+                else:
+                    exact_items += 1
+                    print("Exact Match: Artist: {0}, Album: {1}".format(artist, album))
 
-                album_tracks = get_tracks_from_album(mob, album_id)
+                # album_tracks = get_tracks_from_album(mob, album_id)
                 # pp.pprint(album_tracks)
                 # for each track in album, mob.add_store_track(store_song_id)
             else:
+                no_items += 1
                 print("No Results for Artist: {0}, Album: {1}".format(search_artist, search_album))
 
+    print('----- Summary ------')
+    print("Total Items: {}".format(total_items))
+    print("Partial Matches: {0} ({1:.0f}%)".format(partial_items, ((partial_items / total_items) * 100)))
+    print("Exact Matches: {0} ({1:.0f}%)".format(exact_items, ((exact_items / total_items) * 100)))
+    print("No Matches: {0} ({1:.0f}%)".format(no_items, ((no_items / total_items) * 100)))
 
 if __name__ == '__main__':
     sys.exit(main())
