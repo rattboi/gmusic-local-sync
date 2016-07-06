@@ -108,6 +108,20 @@ def get_local_dirs(path):
         artist_album_list.append(artist_album_dict)
     return artist_album_list
 
+def percent(num, denom):
+    return ((num / denom) * 100)
+
+def print_summary_line(description, count, total):
+    print("{0: <30}: {1} ({2:.0f}%)".format(description, count, percent(count, total)))
+
+def print_summary(total_items, partial_accepted_items, partial_rejected_items, exact_items, no_items):
+    print('----- Summary ------')
+    print("Total Items: {}".format(total_items))
+    print_summary_line("Partial Matches (Accepted)", partial_accepted_items, total_items)
+    print_summary_line("Partial Matches (Rejected)", partial_rejected_items, total_items)
+    print_summary_line("Exact Matches", exact_items, total_items)
+    print_summary_line("No Matches", no_items, total_items)
+
 def print_help():
     print("{0} v{1}".format(sys.argv[0],__version__))
     print("  To use: {} <username> <path>".format(sys.argv[0]))
@@ -127,7 +141,6 @@ def main():
     pp = pprint.PrettyPrinter(indent=4)
 
     local_list = get_local_dirs(path)
-    pp.pprint(local_list)
 
     mob = Mobileclient()
     mob.login(username, password, Mobileclient.FROM_MAC_ADDRESS)
@@ -135,9 +148,12 @@ def main():
         sys.exit(1)
 
     total_items = 0
-    partial_items = 0
+    partial_accepted_items = 0
+    partial_rejected_items = 0
     exact_items = 0
     no_items = 0
+
+    ACCEPT_RATIO = 0.45
 
     for item in local_list:
         search_artist = item['artist']
@@ -152,24 +168,24 @@ def main():
                 (artist, album, ratio, album_id) = sorted_albums[0]
 
                 if ratio > 0:
-                    partial_items += 1
-                    print("Results: ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
+                    if ratio < ACCEPT_RATIO:
+                        partial_accepted_items += 1
+                        print("Partial Match (Accepted): ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
+                    else:
+                        partial_rejected_items += 1
+                        print("Partial Match (Rejected): ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
                 else:
                     exact_items += 1
-                    print("Exact Match: Artist: {0}, Album: {1}".format(artist, album))
+                    print("Exact Match             : Artist: {0}, Album: {1}".format(artist, album))
 
                 # album_tracks = get_tracks_from_album(mob, album_id)
                 # pp.pprint(album_tracks)
                 # for each track in album, mob.add_store_track(store_song_id)
             else:
                 no_items += 1
-                print("No Results for Artist: {0}, Album: {1}".format(search_artist, search_album))
+                print("No Match                : Artist: {0}, Album: {1}".format(search_artist, search_album))
 
-    print('----- Summary ------')
-    print("Total Items: {}".format(total_items))
-    print("Partial Matches: {0} ({1:.0f}%)".format(partial_items, ((partial_items / total_items) * 100)))
-    print("Exact Matches: {0} ({1:.0f}%)".format(exact_items, ((exact_items / total_items) * 100)))
-    print("No Matches: {0} ({1:.0f}%)".format(no_items, ((no_items / total_items) * 100)))
+    print_summary(total_items, partial_accepted_items, partial_rejected_items, exact_items, no_items)
 
 if __name__ == '__main__':
     sys.exit(main())
