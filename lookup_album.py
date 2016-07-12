@@ -39,7 +39,7 @@ def find_ratio(a, b):
 
     distance = levenshtein(a_filtered, b_filtered)
     ratio = (distance / max(len(a_filtered), len(b_filtered), 1))
-    
+
     # if either string is a subset of the other, that is a better fit
     if a in b:
         ratio /= 2
@@ -80,16 +80,16 @@ def cleanup(s):
 
 def filter_hits(hits, artist_name, album_name):
     album_hits = hits['album_hits']
-    return [(a['album']['artist'], 
-             a['album']['name'], 
+    return [(a['album']['artist'],
+             a['album']['name'],
              similarity(a['album']['artist'], artist_name, a['album']['name'], album_name),
-             a['album']['albumId']) 
+             a['album']['albumId'])
              for a in album_hits]
 
 def search_for_artist_and_album(mob, artist, album):
     retries = 2
     while retries > 0:
-        try: 
+        try:
             hits = mob.search("{0} {1}".format(artist, album))
             return filter_hits(hits, artist, album)
         except:
@@ -103,8 +103,56 @@ def search_for_artist_and_album(mob, artist, album):
 
 # Return list of tuples (title, track #, store id) for album
 def get_tracks_from_album(mob, album_id):
-  album_info = mob.get_album_info(album_id,include_tracks=True)
-  return [(t['title'], t['trackNumber'], t['storeId']) for t in album_info['tracks']]
+    album_info = mob.get_album_info(album_id,include_tracks=True)
+    return [(t['title'], t['trackNumber'], t['storeId']) for t in album_info['tracks']]
+
+def add_matched_album_to_library(mob, artist, album, album_id):
+    album_tracks = get_tracks_from_album(mob, album_id)
+    for track in album_tracks:
+        print("Adding to Library: '{0} - {1} - {2} - {3}'".format(artist, album, track[1], track[0]))
+        mob.add_store_track(track[2])
+
+def add_matched_albums_to_library(mob, matched_albums):
+    total_matched_albums = len(matched_albums)
+    print("Adding {} matched albums:".format(total_matched_albums))
+    for i, album_tuple in enumerate(matched_albums):
+        (artist, album, album_id) = album_tuple
+        print("Adding album {0}/{1} :".format(i+1,total_matched_albums))
+        add_matched_album_to_library(mob, artist, album, album_id)
+
+def upload_unmatched_album_to_library(artist, album):
+    print("Uploading to Library: '{0} - {1}'".format(artist, album))
+
+def upload_unmatched_albums_to_library(mob, unmatched_albums):
+    total_unmatched_albums = len(unmatched_albums)
+    print("Uploading {} unmatched albums:".format(total_unmatched_albums))
+    for i, album_tuple in enumerate(unmatched_albums):
+        (artist, album) = album_tuple
+        print("Uploading album {0}/{1} :".format(i+1, total_unmatched_albums))
+        upload_unmatched_album_to_library(artist, album)
+
+def confirmation_dialog(prompt_text):
+    valid = False
+    while not valid:
+        confirm = input("{}: ".format(prompt_text)).lower()
+        if confirm == 'y' or confirm == 'n':
+            valid = True
+    if confirm == 'y':
+        return True
+    else:
+        return False
+
+def process_manual_albums(manual_albums):
+    manual_accepted = []
+    manual_rejected = []
+    for album_tuple in manual_albums:
+        (s_artist, s_album, artist, album, album_id) = album_tuple
+        print("Best match for '{0} - {1}' is '{2} - {3}'".format(s_artist, s_album, artist, album))
+        if confirmation_dialog("Use match? (y/n)"):
+            manual_accepted.append(album_id)
+        else:
+            manual_rejected.append((s_artist, s_album))
+    return (manual_accepted, manual_rejected)
 
 def get_local_dirs(path):
     artist_album_list = []
@@ -142,6 +190,16 @@ def print_help():
     print("          <path>     = root directory containing subdirectories named after artists")
     print("                       (Imagine the root of your music directory)")
 
+def test_process_manual_albums():
+    manual_albums = []
+    manual_albums.append(("Nirvana" , "Nevermind", "Nirvana", "Nevermind (Extended Release)", 12345))
+    manual_albums.append(("NOFX" , "Something", "NOFX", "Something Else", 24134))
+    manual_albums.append(("Abba" , "hello", "Abba", "goodbye", 34123))
+    manual_albums.append(("Lastone" , "matchme", "Lastone", "matchmeplease", 45123))
+    (matched, unmatched) = process_manual_albums(manual_albums)
+    print(matched)
+    print(unmatched)
+
 def main():
     if len(sys.argv) != 3:
         print_help()
@@ -170,15 +228,17 @@ def main():
     ACCEPT_RATIO = 0.33
     REJECT_RATIO = 0.66
 
+    matched_albums = []
+    unmatched_albums = []
+    manual_albums = []
+
     for item in local_list:
         search_artist = item['artist']
         for search_album in item['albums']:
-            # print("Searching for {0} - {1}".format(search_artist, search_album))
             total_items += 1
             albums = search_for_artist_and_album(mob, search_artist, search_album)
             sorted_albums = sorted(albums, key=lambda k:k[2])
 
-            # for (artist, album, ratio, full_details) in sorted_albums:
             if len(sorted_albums) > 0:
                 (artist, album, ratio, album_id) = sorted_albums[0]
 
@@ -186,25 +246,33 @@ def main():
                     if ratio < ACCEPT_RATIO:
                         partial_accepted_items += 1
                         partial_description = 'Partial Match (Accepted)'
+                        matched_albums.append((artist, album, album_id))
                     elif ratio > REJECT_RATIO:
                         partial_rejected_items += 1
                         partial_description = 'Partial Match (Rejected)'
+                        unmatched_albums.append((search_artist, search_album))
                     else:
                         partial_manual_items += 1
                         partial_description = 'Partial Match (Manual)'
+                        manual_albums.append((search_artist, search_album, artist, album, album_id))
                     print_partial(partial_description, ratio, artist, album, search_artist, search_album)
                 else:
                     exact_items += 1
                     print("{0: <30}: Artist: {1}, Album: {2}".format('Exact Match', artist, album))
-
-                # album_tracks = get_tracks_from_album(mob, album_id)
-                # pp.pprint(album_tracks)
-                # for each track in album, mob.add_store_track(store_song_id)
+                    matched_albums.append((artist, album, album_id))
             else:
                 no_items += 1
                 print("{0: <30}: Artist: {1}, Album: {2}".format('No Match', search_artist, search_album))
+                unmatched_albums.append((search_artist, search_album))
 
     print_summary(total_items, partial_accepted_items, partial_rejected_items, partial_manual_items, exact_items, no_items)
+
+    if (confirmation_dialog("Ok to proceed? (y/n)")):
+        (manual_matched, manual_unmatched) = process_manual_albums(manual_albums)
+        matched_albums += manual_matched
+        unmatched_albums += manual_unmatched
+        add_matched_albums_to_library(mob, matched_albums)
+        upload_unmatched_albums_to_library(mob, unmatched_albums)
 
 if __name__ == '__main__':
     sys.exit(main())
