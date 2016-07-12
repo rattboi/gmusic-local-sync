@@ -7,9 +7,19 @@ import pprint
 import string
 import re
 import traceback
+import logging
 from unidecode import unidecode
 
-from gmusicapi import Mobileclient
+from gmusicapi import Mobileclient, Musicmanager
+from gmusicapi_wrapper import MusicManagerWrapper
+
+QUIET = 25
+logging.addLevelName(25, "QUIET")
+
+logger = logging.getLogger('gmusicapi_wrapper')
+sh = logging.StreamHandler()
+logger.addHandler(sh)
+logger.setLevel(logging.INFO)
 
 __version__ = '0.1'
 
@@ -120,16 +130,21 @@ def add_matched_albums_to_library(mob, matched_albums):
         print("Adding album {0}/{1} :".format(i+1,total_matched_albums))
         add_matched_album_to_library(mob, artist, album, album_id)
 
-def upload_unmatched_album_to_library(artist, album):
+def upload_unmatched_album_to_library(mmw, artist, album, songs_to_upload):
     print("Uploading to Library: '{0} - {1}'".format(artist, album))
+    print("Uploading {0} song(s) to Google Music\n".format(len(songs_to_upload)))
+    mmw.upload(songs_to_upload, enable_matching=False, delete_on_success=False)
 
-def upload_unmatched_albums_to_library(mob, unmatched_albums):
+def upload_unmatched_albums_to_library(mmw, base_path, unmatched_albums):
     total_unmatched_albums = len(unmatched_albums)
     print("Uploading {} unmatched albums:".format(total_unmatched_albums))
     for i, album_tuple in enumerate(unmatched_albums):
         (artist, album) = album_tuple
         print("Uploading album {0}/{1} :".format(i+1, total_unmatched_albums))
-        upload_unmatched_album_to_library(artist, album)
+        song_dir_path = "{0}/{1}/{2}".format(base_path, artist, album)
+        local_songs_tuple = mmw.get_local_songs(song_dir_path, exclude_patterns=[], max_depth=0)
+        local_tracks_to_upload, songs_to_filter_ignored, songs_to_exclude_ignored = local_songs_tuple
+        upload_unmatched_album_to_library(mmw, artist, album, local_tracks_to_upload)
 
 def confirmation_dialog(prompt_text):
     valid = False
@@ -149,7 +164,7 @@ def process_manual_albums(manual_albums):
         (s_artist, s_album, artist, album, album_id) = album_tuple
         print("Best match for '{0} - {1}' is '{2} - {3}'".format(s_artist, s_album, artist, album))
         if confirmation_dialog("Use match? (y/n)"):
-            manual_accepted.append(album_id)
+            manual_accepted.append((artist, album, album_id))
         else:
             manual_rejected.append((s_artist, s_album))
     return (manual_accepted, manual_rejected)
@@ -218,6 +233,12 @@ def main():
     if not mob.is_authenticated():
         sys.exit(1)
 
+    mmw = MusicManagerWrapper(enable_logging=True)
+    mmw.login()
+
+    if not mmw.is_authenticated:
+        sys.exit()
+
     total_items = 0
     partial_accepted_items = 0
     partial_rejected_items = 0
@@ -272,7 +293,7 @@ def main():
         matched_albums += manual_matched
         unmatched_albums += manual_unmatched
         add_matched_albums_to_library(mob, matched_albums)
-        upload_unmatched_albums_to_library(mob, unmatched_albums)
+        upload_unmatched_albums_to_library(mmw, path, unmatched_albums)
 
 if __name__ == '__main__':
     sys.exit(main())
