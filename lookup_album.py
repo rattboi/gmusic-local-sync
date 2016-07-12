@@ -5,6 +5,10 @@ import os
 import getpass
 import pprint
 import string
+import re
+import traceback
+from unidecode import unidecode
+
 from gmusicapi import Mobileclient
 
 __version__ = '0.1'
@@ -34,7 +38,7 @@ def find_ratio(a, b):
     b_filtered = cleanup(b)
 
     distance = levenshtein(a_filtered, b_filtered)
-    ratio = (distance / max(len(a_filtered), len(b_filtered))) 
+    ratio = (distance / max(len(a_filtered), len(b_filtered), 1))
     
     # if either string is a subset of the other, that is a better fit
     if a in b:
@@ -69,7 +73,9 @@ def cleanup(s):
               .split())
 
     punc_filter = ''.join(ch for ch in extra_words_filter if ch not in exclude)
-    return punc_filter
+    year_filter = re.sub(r'\d{4}', '', punc_filter)
+    unicode_filter = unidecode(year_filter)
+    return unicode_filter
 
 
 def filter_hits(hits, artist_name, album_name):
@@ -87,7 +93,10 @@ def search_for_artist_and_album(mob, artist, album):
             hits = mob.search("{0} {1}".format(artist, album))
             return filter_hits(hits, artist, album)
         except:
-            print("Oops, some error searching")
+            print("Oops, some error searching:")
+            print('-'*60)
+            traceback.print_exc(file=sys.stdout)
+            print('-'*60)
             retries = retries - 1
     sys.exit(2)
 
@@ -114,13 +123,17 @@ def percent(num, denom):
 def print_summary_line(description, count, total):
     print("{0: <30}: {1} ({2:.0f}%)".format(description, count, percent(count, total)))
 
-def print_summary(total_items, partial_accepted_items, partial_rejected_items, exact_items, no_items):
+def print_summary(total_items, partial_accepted_items, partial_rejected_items, partial_manual_items, exact_items, no_items):
     print('----- Summary ------')
     print("Total Items: {}".format(total_items))
     print_summary_line("Partial Matches (Accepted)", partial_accepted_items, total_items)
     print_summary_line("Partial Matches (Rejected)", partial_rejected_items, total_items)
+    print_summary_line("Partial Matches (Manual)", partial_manual_items, total_items)
     print_summary_line("Exact Matches", exact_items, total_items)
     print_summary_line("No Matches", no_items, total_items)
+
+def print_partial(description, ratio, artist, album, search_artist, search_album):
+    print("{0: <30}: ({1:.0f}%) {2} - {3} for {4} - {5}".format(description, percent(1. - ratio, 1), artist, album, search_artist, search_album))
 
 def print_help():
     print("{0} v{1}".format(sys.argv[0],__version__))
@@ -150,10 +163,12 @@ def main():
     total_items = 0
     partial_accepted_items = 0
     partial_rejected_items = 0
+    partial_manual_items = 0
     exact_items = 0
     no_items = 0
 
-    ACCEPT_RATIO = 0.45
+    ACCEPT_RATIO = 0.33
+    REJECT_RATIO = 0.66
 
     for item in local_list:
         search_artist = item['artist']
@@ -170,22 +185,26 @@ def main():
                 if ratio > 0:
                     if ratio < ACCEPT_RATIO:
                         partial_accepted_items += 1
-                        print("Partial Match (Accepted): ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
-                    else:
+                        partial_description = 'Partial Match (Accepted)'
+                    elif ratio > REJECT_RATIO:
                         partial_rejected_items += 1
-                        print("Partial Match (Rejected): ({2:.0f}%) {0} - {1} for {3} - {4}".format(artist, album, ((1. - ratio) * 100), search_artist, search_album))
+                        partial_description = 'Partial Match (Rejected)'
+                    else:
+                        partial_manual_items += 1
+                        partial_description = 'Partial Match (Manual)'
+                    print_partial(partial_description, ratio, artist, album, search_artist, search_album)
                 else:
                     exact_items += 1
-                    print("Exact Match             : Artist: {0}, Album: {1}".format(artist, album))
+                    print("{0: <30}: Artist: {1}, Album: {2}".format('Exact Match', artist, album))
 
                 # album_tracks = get_tracks_from_album(mob, album_id)
                 # pp.pprint(album_tracks)
                 # for each track in album, mob.add_store_track(store_song_id)
             else:
                 no_items += 1
-                print("No Match                : Artist: {0}, Album: {1}".format(search_artist, search_album))
+                print("{0: <30}: Artist: {1}, Album: {2}".format('No Match', search_artist, search_album))
 
-    print_summary(total_items, partial_accepted_items, partial_rejected_items, exact_items, no_items)
+    print_summary(total_items, partial_accepted_items, partial_rejected_items, partial_manual_items, exact_items, no_items)
 
 if __name__ == '__main__':
     sys.exit(main())
